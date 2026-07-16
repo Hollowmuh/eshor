@@ -10,3 +10,7 @@ build/
 .DS_Store
 coverage/
 .turbo/
+
+# Medusa build artifacts
+apps/backend/.medusa/
+apps/backend/dist/
