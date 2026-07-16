@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: eshor
+          POSTGRES_PASSWORD: eshor_ci
+          POSTGRES_DB: eshor_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U eshor -d eshor_test"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Lint (includes money rule)
+        run: pnpm lint
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Tests (unit + property + race suites)
+        run: pnpm test
+        env:
+          DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
+          REDIS_URL: redis://localhost:6379
+
+  # Perf budgets (L3): PLP <=300KB, PDP <=500KB, checkout <=200KB, LCP <5s @1.6Mbps.
+  # Activates when the storefront exists; kept failing-capable from day one.
+  lighthouse:
+    runs-on: ubuntu-latest
+    if: false # flip to true when apps/storefront builds (P0 day 8)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter storefront build && pnpm --filter storefront start &
+      - run: npx -y @lhci/cli autorun --config=lighthouserc.json

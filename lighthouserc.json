@@ -1,0 +1,28 @@
+{
+  "ci": {
+    "collect": {
+      "url": [
+        "http://localhost:3000/",
+        "http://localhost:3000/plp-demo",
+        "http://localhost:3000/pdp-demo"
+      ],
+      "numberOfRuns": 1,
+      "settings": {
+        "throttling": {
+          "throughputKbps": 1600,
+          "requestLatencyMs": 150,
+          "cpuSlowdownMultiplier": 4
+        },
+        "formFactor": "mobile",
+        "screenEmulation": { "mobile": true, "width": 390, "height": 844, "deviceScaleFactor": 2 }
+      }
+    },
+    "assert": {
+      "assertions": {
+        "largest-contentful-paint": ["error", { "maxNumericValue": 5000 }],
+        "total-byte-weight": ["error", { "maxNumericValue": 512000 }],
+        "unused-javascript": ["warn", { "maxNumericValue": 100000 }]
+      }
+    }
+  }
+}
