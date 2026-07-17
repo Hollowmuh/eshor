@@ -86,21 +86,44 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
   }
 
   /**
-   * Medusa's BigNumberInput here is the payment session's amount in the
-   * currency's human-readable major unit (e.g. 24500 for NGN24,500,
-   * matching how the rest of Medusa core handles amounts) -- Paystack's
-   * API wants the subunit (kobo). *** UNVERIFIED against a live
-   * transaction *** -- this exact conversion is the first thing to
-   * confirm once real test keys exist (P1.3 exit criterion).
+   * CONFIRMED live 2026-07-17 (was flagged unverified, now resolved):
+   * Medusa's BigNumberInput here is ALREADY in the currency's smallest
+   * unit (kobo for NGN) -- it matches the raw `amount` stored on the
+   * product variant's price exactly (seed-demo.ts seeds
+   * `priceNaira * 100`, and the payment session's `input.amount` arrived
+   * as that same number, e.g. 2450000 for a NGN24,500 item). No
+   * multiplication needed; multiplying here would have silently
+   * overcharged every real transaction by 100x.
    */
   private toKobo(amount: unknown): number {
-    return Math.round(Number(amount) * 100);
+    return Math.round(Number(amount));
   }
 
   private fromKobo(amountKobo: number): BigNumber {
-    return new BigNumber(amountKobo / 100);
+    return new BigNumber(amountKobo);
   }
 
+  /**
+   * CONFIRMED live 2026-07-17 (earlier comment here blamed raw
+   * createCartWorkflow vs the real store API -- disproven; the real
+   * cause was one level up). context.customer.email only arrives
+   * populated if the caller is authenticated: Medusa's
+   * createPaymentSessionsWorkflow builds `context.customer` from a
+   * `customer_id` in its own workflow input, and the store API's
+   * POST /store/payment-collections/:id/payment-sessions route sources
+   * that customer_id *only* from `req.auth_context?.actor_id` -- never
+   * from the cart's own linked customer_id, even when the cart already
+   * has a real guest Customer record. Proved this by reading the
+   * installed source directly (core-flows'
+   * create-payment-session.js workflow and medusa's store
+   * payment-sessions route.js), then confirming live: the identical
+   * request against a cart with a confirmed linked customer failed
+   * with this exact error when unauthenticated, and succeeded once a
+   * silent guest emailpass login (random password) put a JWT on the
+   * request. So this method itself needs no workaround -- the fix
+   * lives in the checkout flow, which must silently authenticate the
+   * guest before calling payment-sessions (see p1-3-paystack-live-drill.ts).
+   */
   private customerEmail(input: { context?: { customer?: { email?: string } } }): string {
     const email = input.context?.customer?.email;
     if (!email) {
