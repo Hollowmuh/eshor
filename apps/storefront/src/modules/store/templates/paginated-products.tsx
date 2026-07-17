@@ -2,6 +2,7 @@ import { listProductsWithSort } from "@lib/data/products"
 import { getRegion } from "@lib/data/regions"
 import { OptionValueIds } from "@lib/util/product-option-filters"
 import ProductPreview from "@modules/products/components/product-preview"
+import { isFullySoldOut } from "@modules/products/components/product-preview/size-badges"
 import { Pagination } from "@modules/store/components/pagination"
 import { SortOptions } from "@modules/store/components/refinement-list/sort-products"
 
@@ -70,13 +71,20 @@ export default async function PaginatedProducts({
 
   const totalPages = Math.ceil(count / PRODUCT_LIMIT)
 
+  // Layer 3 PLP §3: sold-out items sink to the bottom rather than
+  // occupying prime grid position — a stable partition, so the sortBy
+  // ordering above is preserved within each group.
+  const sortedProducts = [...products].sort(
+    (a, b) => Number(isFullySoldOut(a)) - Number(isFullySoldOut(b))
+  )
+
   return (
     <>
       <ul
         className="grid grid-cols-2 w-full small:grid-cols-3 medium:grid-cols-4 gap-x-6 gap-y-8"
         data-testid="products-list"
       >
-        {products.map((p) => {
+        {sortedProducts.map((p) => {
           return (
             <li key={p.id}>
               <ProductPreview product={p} region={region} />

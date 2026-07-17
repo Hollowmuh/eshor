@@ -114,11 +114,15 @@ export default async function ProductPage(props: Props) {
     queryParams: { handle: params.handle },
   }).then(({ response }) => response.products[0])
 
-  const images = getImagesForVariant(pricedProduct, selectedVariantId)
-
+  // EC2.5 / hardening: a non-existent handle (old shared link) must 404
+  // cleanly, not crash. getImagesForVariant reads product.images, so it
+  // must never run before this guard -- the starter's original ordering
+  // called it first and threw a TypeError (500) instead of notFound().
   if (!pricedProduct) {
     notFound()
   }
+
+  const images = getImagesForVariant(pricedProduct, selectedVariantId)
 
   return (
     <ProductTemplate

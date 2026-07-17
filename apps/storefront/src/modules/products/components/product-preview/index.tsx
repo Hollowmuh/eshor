@@ -4,6 +4,7 @@ import { HttpTypes } from "@medusajs/types"
 import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import Thumbnail from "../thumbnail"
 import PreviewPrice from "./price"
+import SizeBadges, { isFullySoldOut } from "./size-badges"
 
 export default async function ProductPreview({
   product,
@@ -27,8 +28,15 @@ export default async function ProductPreview({
     product,
   })
 
+  const soldOut = isFullySoldOut(product)
+
   return (
-    <LocalizedClientLink href={`/products/${product.handle}`} className="group">
+    <LocalizedClientLink
+      href={`/products/${product.handle}`}
+      className={soldOut ? "group opacity-60" : "group"}
+      data-testid="product-wrapper-link"
+      data-sold-out={soldOut}
+    >
       <div data-testid="product-wrapper">
         <Thumbnail
           thumbnail={product.thumbnail}
@@ -44,6 +52,7 @@ export default async function ProductPreview({
             {cheapestPrice && <PreviewPrice price={cheapestPrice} />}
           </div>
         </div>
+        <SizeBadges product={product} />
       </div>
     </LocalizedClientLink>
   )
