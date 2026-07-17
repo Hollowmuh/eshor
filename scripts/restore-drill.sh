@@ -23,7 +23,14 @@ if [ "$BEFORE_COUNT" -lt 1 ]; then
 fi
 
 echo "== 2. dump =="
-docker exec "$CONTAINER" pg_dump -U "$USER" -d "$DB" --no-owner --no-privileges > "$DUMP_FILE"
+# --no-privileges was tried here first and is deliberately NOT used: it
+# strips GRANT statements from the dump, which silently broke the
+# eshor_app role's access to eshor_core after a real restore (caught by
+# the kernel's own ledger-immutability integration test failing after
+# this drill's first run -- exactly what a restore drill should catch,
+# just discovered a step too late; step 8 below now checks it directly
+# so this regression is caught by the drill itself, not by accident).
+docker exec "$CONTAINER" pg_dump -U "$USER" -d "$DB" --no-owner > "$DUMP_FILE"
 DUMP_SIZE=$(wc -c < "$DUMP_FILE")
 echo "dump written: $DUMP_FILE ($DUMP_SIZE bytes)"
 if [ "$DUMP_SIZE" -lt 10000 ]; then
@@ -91,4 +98,17 @@ if [ "$SPINE_TABLES" -lt 5 ]; then
   exit 1
 fi
 
-echo "RESTORE-DRILL-OK: dump=$DUMP_SIZE bytes, products=$AFTER_COUNT, spine_tables=$SPINE_TABLES"
+echo "== 8. verify eshor_app role permissions survived (the actual bug this drill once caught) =="
+APP_GRANTS=$(docker exec "$CONTAINER" psql -U "$USER" -d "$DB" -tAc \
+  "SELECT count(*) FROM information_schema.role_usage_grants WHERE object_schema='eshor_core' AND grantee='eshor_app'")
+echo "eshor_app schema-usage grants after restore: $APP_GRANTS"
+if [ "$APP_GRANTS" -lt 1 ]; then
+  echo "FAIL: eshor_app has no grants on eshor_core after restore -- ledger immutability and all"
+  echo "      spine writes are broken until GRANT statements from migration 001 are reapplied."
+  echo "      (This exact regression happened once: pg_dump --no-privileges silently stripped"
+  echo "       them. Fixed by dropping --no-privileges from the dump command above -- if this"
+  echo "       check ever fails again, something else broke the grants.)"
+  exit 1
+fi
+
+echo "RESTORE-DRILL-OK: dump=$DUMP_SIZE bytes, products=$AFTER_COUNT, spine_tables=$SPINE_TABLES, eshor_app_grants=$APP_GRANTS"
