@@ -8,9 +8,17 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "test:unit": "vitest run --exclude '**/*.integration.test.ts'",
+    "test:integration": "vitest run test/**/*.integration.test.ts",
+    "typecheck": "tsc --noEmit",
+    "migrate": "node --experimental-strip-types scripts/migrate.ts"
+  },
+  "dependencies": {
+    "pg": "^8.13.0"
   },
   "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/pg": "^8.11.0",
     "fast-check": "^4.5.0",
     "typescript": "^5.9.0",
     "vitest": "^4.0.0"
