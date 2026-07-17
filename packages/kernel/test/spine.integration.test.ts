@@ -12,14 +12,16 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import {
   closePool,
-  createOrderLite,
+  ensureOrderState,
   decrementStock,
   fetchUnprocessed,
   getBalance,
   getOrderState,
+  getOrderStateByTrackingToken,
   getPool,
   IllegalTransitionError,
   appendLedgerEntry,
+  computeTrackingProof,
   kobo,
   reserveStock,
   releaseExpiredReservations,
@@ -92,15 +94,27 @@ describeIf("Spine integration (real Postgres)", () => {
     });
   });
 
-  describe("order transitions — DB-enforced, outbox-coupled", () => {
+  describe("order transitions — DB-enforced, outbox-coupled (keyed by a real Medusa order id)", () => {
+    it("ensureOrderState is idempotent — the 'created' flag distinguishes insert from no-op", async () => {
+      const medusaOrderId = `order_${randomUUID()}`;
+      const first = await ensureOrderState(medusaOrderId);
+      expect(first.created).toBe(true);
+      expect(first.state).toBe("pending_payment");
+
+      const second = await ensureOrderState(medusaOrderId);
+      expect(second.created).toBe(false);
+      expect(second.trackingToken).toBe(first.trackingToken); // same row, not regenerated
+    });
+
     it("legal transition updates state and writes an outbox event atomically", async () => {
-      const orderId = await createOrderLite();
+      const medusaOrderId = `order_${randomUUID()}`;
+      await ensureOrderState(medusaOrderId);
       const before = await fetchUnprocessed(1000);
 
-      const result = await transitionOrder(orderId, "paid");
+      const result = await transitionOrder(medusaOrderId, "paid");
       expect(result.from).toBe("pending_payment");
       expect(result.to).toBe("paid");
-      expect(await getOrderState(orderId)).toBe("paid");
+      expect(await getOrderState(medusaOrderId)).toBe("paid");
 
       const after = await fetchUnprocessed(1000);
       expect(after.length).toBe(before.length + 1);
@@ -109,31 +123,55 @@ describeIf("Spine integration (real Postgres)", () => {
     });
 
     it("illegal transition is rejected by BOTH the app kernel and the DB trigger", async () => {
-      const orderId = await createOrderLite();
+      const medusaOrderId = `order_${randomUUID()}`;
+      await ensureOrderState(medusaOrderId);
       // pending_payment -> dispatched skips payment entirely: illegal.
-      await expect(transitionOrder(orderId, "dispatched")).rejects.toThrow(
+      await expect(transitionOrder(medusaOrderId, "dispatched")).rejects.toThrow(
         IllegalTransitionError,
       );
-      expect(await getOrderState(orderId)).toBe("pending_payment"); // unchanged
+      expect(await getOrderState(medusaOrderId)).toBe("pending_payment"); // unchanged
     });
 
     it("transitioning a non-existent order fails cleanly", async () => {
-      await expect(transitionOrder(randomUUID(), "paid")).rejects.toThrow(TransitionError);
+      await expect(transitionOrder(`order_${randomUUID()}`, "paid")).rejects.toThrow(
+        TransitionError,
+      );
     });
 
     it("no outbox event is written when the transition is illegal (atomicity)", async () => {
-      const orderId = await createOrderLite();
+      const medusaOrderId = `order_${randomUUID()}`;
+      await ensureOrderState(medusaOrderId);
       const before = await fetchUnprocessed(1000);
-      await expect(transitionOrder(orderId, "delivered")).rejects.toThrow();
+      await expect(transitionOrder(medusaOrderId, "delivered")).rejects.toThrow();
       const after = await fetchUnprocessed(1000);
       expect(after.length).toBe(before.length); // rolled back together
+    });
+
+    it("tracking token round-trips: lookup by token returns the same order + state", async () => {
+      const medusaOrderId = `order_${randomUUID()}`;
+      const { trackingToken } = await ensureOrderState(medusaOrderId);
+      await transitionOrder(medusaOrderId, "paid");
+
+      const found = await getOrderStateByTrackingToken(trackingToken);
+      expect(found?.medusaOrderId).toBe(medusaOrderId);
+      expect(found?.state).toBe("paid");
+    });
+
+    it("tracking proof is deterministic per (order, email) and differs for a different email", () => {
+      const secret = "test-secret";
+      const proofA = computeTrackingProof("order_1", "amaka@example.com", secret);
+      const proofB = computeTrackingProof("order_1", "amaka@example.com", secret);
+      const proofC = computeTrackingProof("order_1", "different@example.com", secret);
+      expect(proofA).toBe(proofB);
+      expect(proofA).not.toBe(proofC);
     });
   });
 
   describe("outbox relay — at-least-once delivery", () => {
     it("delivers unprocessed events and marks them processed", async () => {
-      const orderId = await createOrderLite();
-      await transitionOrder(orderId, "paid");
+      const medusaOrderId = `order_${randomUUID()}`;
+      await ensureOrderState(medusaOrderId);
+      await transitionOrder(medusaOrderId, "paid");
 
       const delivered: string[] = [];
       const count = await relayOnce(async (row) => {
@@ -155,8 +193,9 @@ describeIf("Spine integration (real Postgres)", () => {
     });
 
     it("if the consumer throws mid-batch, unprocessed events survive for retry", async () => {
-      const orderId = await createOrderLite();
-      const { outboxId } = await transitionOrder(orderId, "paid");
+      const medusaOrderId = `order_${randomUUID()}`;
+      await ensureOrderState(medusaOrderId);
+      const { outboxId } = await transitionOrder(medusaOrderId, "paid");
 
       await expect(
         relayOnce(async (row) => {

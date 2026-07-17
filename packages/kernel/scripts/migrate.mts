@@ -6,6 +6,12 @@
  *
  * Tracks applied migrations in eshor_core.schema_migrations. Idempotent:
  * safe to run repeatedly (also part of the CI migration-dry-run gate).
+ *
+ * .mts extension is deliberate: kernel's package.json is CommonJS by
+ * default (Medusa's ts-node subscriber loader requires this — see git
+ * history for the ERR_REQUIRE_ESM this fixed), but this script needs
+ * import.meta.url. .mts always means ESM to Node regardless of the
+ * nearest package.json "type" field.
  */
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
