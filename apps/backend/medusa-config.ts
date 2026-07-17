@@ -17,5 +17,8 @@ module.exports = defineConfig({
     {
       resolve: './src/modules/garment-fit',
     },
+    {
+      resolve: './src/modules/delivery-zones',
+    },
   ],
 })
