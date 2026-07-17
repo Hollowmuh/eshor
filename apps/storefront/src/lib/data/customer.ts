@@ -6,6 +6,7 @@ import { HttpTypes } from "@medusajs/types"
 import { FetchError } from "@medusajs/js-sdk"
 import { revalidateTag } from "next/cache"
 import { redirect } from "next/navigation"
+import { randomBytes } from "node:crypto"
 import {
   getAuthHeaders,
   getCacheOptions,
@@ -276,6 +277,118 @@ export async function transferCart() {
 
   const cartCacheTag = await getCacheTag("carts")
   revalidateTag(cartCacheTag)
+}
+
+export type SilentGuestAuthResult =
+  | { state: "ok" }
+  | { state: "identity_exists"; email: string }
+  | { state: "error"; error: string }
+
+/**
+ * Guest checkout needs *some* authenticated actor on the request, purely
+ * as internal plumbing: Medusa v2's createPaymentSessionsWorkflow only
+ * populates context.customer (which every payment provider reads the
+ * shopper's email from) when the request carries an authenticated
+ * customer_id (req.auth_context.actor_id) -- never from the cart's own
+ * linked customer_id, even for a guest cart with a real linked Customer
+ * record. Confirmed by reading Medusa's installed source directly (see
+ * apps/backend/src/scripts/p1-3-paystack-live-drill.ts for the full
+ * trace) and proving live that an authenticated request succeeds where
+ * an identical unauthenticated one fails.
+ *
+ * This registers a real Customer + auth identity behind a random
+ * password the shopper never sees or sets, then logs in and stores the
+ * JWT the same way a real login would (setAuthToken). From the shopper's
+ * side this is invisible -- no password field, no verification email (no
+ * email-verification requirement is configured for this project's
+ * emailpass provider, confirmed live via two successful register->login
+ * round trips with no verification_required response).
+ *
+ * A returning shopper whose email already has an identity (a real
+ * registered account, or an auth identity left over from an earlier
+ * checkout) can't be silently re-registered under a *different* random
+ * password -- that would just fail to log in. Rather than mask this as a
+ * generic error, it's surfaced as `identity_exists` so the checkout UI
+ * can ask them to log in with their real password instead of silently
+ * breaking or double-creating identities.
+ */
+export async function silentGuestAuth(
+  email: string
+): Promise<SilentGuestAuthResult> {
+  const existingAuth = await getAuthHeaders()
+  if ("authorization" in existingAuth) {
+    // Already authenticated (returning shopper mid-session, or a prior
+    // step in this same checkout already ran this). Nothing to do.
+    return { state: "ok" }
+  }
+
+  const password = randomBytes(24).toString("base64url")
+
+  try {
+    await sdk.auth.register("customer", "emailpass", { email, password })
+  } catch (error) {
+    const fetchError = error as FetchError
+    if (
+      fetchError.statusText === "Unauthorized" &&
+      fetchError.message === "Identity with email already exists"
+    ) {
+      return { state: "identity_exists", email }
+    }
+    return { state: "error", error: String(error) }
+  }
+
+  let result: Awaited<ReturnType<typeof sdk.auth.login>>
+  try {
+    result = await sdk.auth.login("customer", "emailpass", { email, password })
+  } catch (error) {
+    return { state: "error", error: String(error) }
+  }
+
+  if (typeof result !== "string") {
+    // A freshly-registered emailpass identity always logs in with a bare
+    // token (no verification_required, no third-party `location`
+    // redirect) -- confirmed live. Anything else here is unexpected.
+    return {
+      state: "error",
+      error: "Unexpected auth response completing guest checkout.",
+    }
+  }
+
+  let token = result
+
+  const customerExists = await sdk.store.customer
+    .retrieve({}, { authorization: `Bearer ${token}` })
+    .then(() => true)
+    .catch(() => false)
+
+  if (!customerExists) {
+    try {
+      await sdk.store.customer.create(
+        { email },
+        {},
+        { authorization: `Bearer ${token}` }
+      )
+      token = (await sdk.auth.login("customer", "emailpass", {
+        email,
+        password,
+      })) as string
+    } catch (error) {
+      return { state: "error", error: String(error) }
+    }
+  }
+
+  await setAuthToken(token)
+
+  const customerCacheTag = await getCacheTag("customers")
+  revalidateTag(customerCacheTag)
+
+  try {
+    await transferCart()
+  } catch (error) {
+    return { state: "error", error: String(error) }
+  }
+
+  return { state: "ok" }
 }
 
 export const addCustomerAddress = async (
