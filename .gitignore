@@ -15,3 +15,6 @@ coverage/
 apps/backend/.medusa/
 apps/backend/dist/
 *.tsbuildinfo
+
+# Lighthouse CI reports (regenerated per run)
+.lighthouseci/

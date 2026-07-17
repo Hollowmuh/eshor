@@ -2,9 +2,9 @@
   "ci": {
     "collect": {
       "url": [
-        "http://localhost:3000/",
-        "http://localhost:3000/plp-demo",
-        "http://localhost:3000/pdp-demo"
+        "http://localhost:8000/ng",
+        "http://localhost:8000/ng/store",
+        "http://localhost:8000/ng/products/aja-dress"
       ],
       "numberOfRuns": 1,
       "settings": {

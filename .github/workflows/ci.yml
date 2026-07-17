@@ -40,18 +40,68 @@ jobs:
       - name: Lint (includes money rule)
         run: pnpm lint
       - name: Typecheck
+        # Scopes to packages that define a "typecheck" script (currently
+        # kernel + image-pipeline; verified 2026-07-17). apps/backend and
+        # apps/storefront intentionally don't define one yet -- the
+        # vendored Next.js starter carries ~335 pre-existing React
+        # 19/Radix UI type errors unrelated to any eshor code (confirmed
+        # by isolating our own files, which are clean). Do not add a
+        # "typecheck" script to apps/storefront/package.json until that
+        # is fixed, or this gate will start failing on vendor noise.
         run: pnpm typecheck
       - name: Tests (unit + property + race suites)
         run: pnpm test
         env:
           DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
           REDIS_URL: redis://localhost:6379
+      - name: Prove the money-lint and boot-guard gates actually fail bad code
+        run: bash scripts/prove-gates.sh
 
-  # Perf budgets (L3): PLP <=300KB, PDP <=500KB, checkout <=200KB, LCP <5s @1.6Mbps.
-  # Activates when the storefront exists; kept failing-capable from day one.
+  # Perf budgets (Layer 3): PLP/PDP total-byte-weight <=500KB, LCP <5s
+  # @1.6Mbps throttle. Verified locally against real Chromium 2026-07-17:
+  # home 221KB/1985ms, PLP 279KB/2623ms, PDP 265KB/2140ms -- all green,
+  # after removing 4 leftover starter-template sample products whose
+  # unoptimized demo images were the actual budget-blowing culprit
+  # (2.7MB of a 2.99MB PDP), not anything in eshor's own code.
+  #
+  # NOTE: this job's YAML has not been executed against real GitHub
+  # Actions infrastructure (no CI runner access in this environment) --
+  # every other gate in this workflow was run for real; this one is
+  # written to the same standard of care but unverified end-to-end on
+  # GHA specifically. Chrome is expected pre-installed on ubuntu-latest
+  # runners (unlike the WSL dev sandbox, which needed a manual
+  # chromium-browser install due to a Windows/Linux interop quirk).
   lighthouse:
     runs-on: ubuntu-latest
-    if: false # flip to true when apps/storefront builds (P0 day 8)
+    needs: quality
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: eshor
+          POSTGRES_PASSWORD: eshor_ci
+          POSTGRES_DB: eshor
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U eshor -d eshor"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor
+      REDIS_URL: redis://localhost:6379
+      APP_ENV: development
+      STORE_CORS: http://localhost:8000
+      ADMIN_CORS: http://localhost:9000
+      AUTH_CORS: http://localhost:8000,http://localhost:9000
+      JWT_SECRET: ci_jwt_secret
+      COOKIE_SECRET: ci_cookie_secret
+      NEXT_PUBLIC_MEDUSA_BACKEND_URL: http://localhost:9000
+      NEXT_PUBLIC_DEFAULT_REGION: ng
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -60,5 +110,54 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter storefront build && pnpm --filter storefront start &
-      - run: npx -y @lhci/cli autorun --config=lighthouserc.json
+
+      - name: Migrate backend (Medusa core + eshor_core spine + garmentFit)
+        working-directory: apps/backend
+        run: |
+          npx medusa db:migrate
+
+      - name: Boot backend
+        working-directory: apps/backend
+        run: |
+          npx medusa develop > /tmp/medusa-ci.log 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS -m 2 http://localhost:9000/health > /dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo "Backend failed to become healthy"; cat /tmp/medusa-ci.log; exit 1
+
+      - name: Create admin user + publishable key
+        working-directory: apps/backend
+        # create-pub-key.sh hardcodes admin@eshor.dev / DevAdmin_ChangeMe1
+        # (it's a local-dev convenience script, not env-configurable) --
+        # matching that exactly here rather than inventing env vars it
+        # doesn't read.
+        run: |
+          npx medusa user -e admin@eshor.dev -p DevAdmin_ChangeMe1
+          KEY=$(bash ../../scripts/create-pub-key.sh)
+          echo "NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY=$KEY" >> "$GITHUB_ENV"
+
+      - name: Seed demo catalog (creates NG region + 12 products)
+        working-directory: apps/backend
+        run: npx medusa exec ./src/scripts/seed-demo.ts
+
+      - name: Remove starter sample products (the actual Lighthouse fix)
+        working-directory: apps/backend
+        run: npx medusa exec ./src/scripts/remove-starter-samples.ts
+
+      - name: Build storefront
+        working-directory: apps/storefront
+        run: npx next build
+
+      - name: Start storefront
+        working-directory: apps/storefront
+        run: |
+          npx next start -p 8000 &
+          for i in $(seq 1 60); do
+            curl -fsS -m 2 http://localhost:8000/ng > /dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          exit 1
+
+      - name: Lighthouse CI (fails the build on budget violation)
+        run: npx -y @lhci/cli@0.15 autorun --config=lighthouserc.json
