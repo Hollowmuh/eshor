@@ -29,6 +29,43 @@ export const retrieveOrder = async (id: string) => {
     .catch((err) => medusaError(err))
 }
 
+export type OrderTrackingState = {
+  state: string
+  display_id: number | null
+  first_name: string | null
+  city: string | null
+}
+
+/** Public tracking lookup -- unauthenticated, the token alone is the capability. */
+export const getTrackingByToken = async (
+  token: string
+): Promise<OrderTrackingState | null> => {
+  return sdk.client
+    .fetch<OrderTrackingState>(`/store/orders/track/${token}`, {
+      method: "GET",
+      cache: "no-store",
+    })
+    .catch(() => null)
+}
+
+/** Confirmation page uses this to build its own order's tracking link. */
+export const getOrderTrackingToken = async (
+  orderId: string
+): Promise<string | null> => {
+  const headers = {
+    ...(await getAuthHeaders()),
+  }
+
+  return sdk.client
+    .fetch<{ tracking_token: string }>(`/store/orders/${orderId}/tracking-token`, {
+      method: "GET",
+      headers,
+      cache: "no-store",
+    })
+    .then(({ tracking_token }) => tracking_token)
+    .catch(() => null)
+}
+
 export const listOrders = async (
   limit: number = 10,
   offset: number = 0,
