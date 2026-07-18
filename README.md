@@ -48,11 +48,24 @@ npx medusa user -e admin@eshor.dev -p DevAdmin_ChangeMe1
 #    graded garment measurements, then proves the publish guard works
 npx medusa exec ./src/scripts/seed-demo.ts
 
-# 7. remove the starter template's 4 sample products (unoptimized demo
-#    images that blow the perf budget — see git log for the story)
+# 7. seed the Nigerian delivery-zone flat-rate table (P1.2)
+npx medusa exec ./src/scripts/seed-delivery-zones.ts
+
+# 8. create the "Standard delivery" shipping option backed by the
+#    delivery-zones-fulfillment provider (P1.4) -- without this,
+#    checkout has no shipping option and cart.shipping_total never
+#    includes the delivery fee
+npx medusa exec ./src/scripts/seed-delivery-fulfillment.ts
+
+# 9. link the Paystack payment provider to the Nigeria region (P1.3) --
+#    without this, Paystack never appears as a checkout payment option
+npx medusa exec ./src/scripts/link-paystack-to-region.ts
+
+# 10. remove the starter template's 4 sample products (unoptimized demo
+#     images that blow the perf budget — see git log for the story)
 npx medusa exec ./src/scripts/remove-starter-samples.ts
 
-# 8. storefront
+# 11. storefront
 cd ../storefront
 npx next dev --turbopack -p 8000
 ```
@@ -63,9 +76,13 @@ Then visit `http://localhost:8000/ng`.
 as `pnpm i && docker compose up && pnpm dev && pnpm seed:demo`. The real
 sequence has a few more one-time steps (admin user, publishable key,
 env wiring) that aren't yet automated into a single command — a good
-P1 polish item (`pnpm bootstrap` wrapping steps 2–7) but not done here.
-Every step above has been run for real, in this order, against a clean
-database, this session.
+P1 polish item (`pnpm bootstrap` wrapping steps 2–10) but not done here.
+Steps 1–6 have been run for real, in this order, against a clean
+database, in an earlier session. Steps 7–9 (delivery-zones,
+delivery-fulfillment, Paystack region-linking) were added in this
+session and individually verified against the running dev database
+(all three are idempotent, safe to rerun) — not yet proven as part of
+one single fresh-clone run all the way through.
 
 ## Verify it's working
 
@@ -76,7 +93,7 @@ database, this session.
 ## Testing
 
 ```bash
-pnpm test        # kernel + image-pipeline unit/property tests
+pnpm test        # kernel + image-pipeline unit/property tests, backend unit tests, storefront unit tests
 # spine integration tests (real Postgres, incl. the drop-day stock race
 # test and the ledger-immutability proof) need DATABASE_URL set:
 DATABASE_URL=postgres://eshor:eshor_dev@localhost:5432/eshor \

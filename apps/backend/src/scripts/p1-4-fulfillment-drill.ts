@@ -120,9 +120,13 @@ async function main() {
   console.log("cart.total:                ", finalCart.total);
   console.log("==============");
 
-  if (finalCart.shipping_total !== zonesQuote.json.fee_kobo) {
+  // delivery_zone.fee_kobo is genuinely kobo; cart.shipping_total is
+  // Medusa's plain-decimal Naira, divided by the fulfillment provider's
+  // calculatePrice() -- see that service's own comment.
+  const expectedShippingTotal = zonesQuote.json.fee_kobo / 100;
+  if (finalCart.shipping_total !== expectedShippingTotal) {
     throw new Error(
-      `MISMATCH: cart.shipping_total (${finalCart.shipping_total}) !== delivery-zones fee_kobo (${zonesQuote.json.fee_kobo})`,
+      `MISMATCH: cart.shipping_total (${finalCart.shipping_total}) !== delivery-zones fee_kobo/100 (${expectedShippingTotal})`,
     );
   }
   if (finalCart.total !== finalCart.item_total + finalCart.shipping_total) {

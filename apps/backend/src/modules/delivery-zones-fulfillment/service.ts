@@ -125,7 +125,14 @@ class DeliveryZonesFulfillmentProviderService extends AbstractFulfillmentProvide
     }
 
     return {
-      calculated_amount: quote.fee_kobo,
+      // delivery_zone.fee_kobo is genuinely stored in kobo (150000 for
+      // NGN1,500); Medusa's calculated_amount wants the plain decimal
+      // Naira value, matching its own price-creation API convention --
+      // confirmed live 2026-07-18 (see seed-demo.ts's own fix comment
+      // for the full story). Divide here, not at the schema/seed level,
+      // since this raw-SQL provider is the only consumer that crosses
+      // into Medusa's BigNumber pricing system.
+      calculated_amount: quote.fee_kobo / 100,
       is_calculated_price_tax_inclusive: true,
     };
   }

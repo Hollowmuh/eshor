@@ -22,7 +22,7 @@
  *
  * Run: npx medusa exec ./src/scripts/seed-delivery-fulfillment.ts
  */
-import type { ExecArgs } from "@medusajs/framework/types";
+import type { ExecArgs, Logger, MedusaContainer } from "@medusajs/framework/types";
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils";
 import {
   createServiceZonesWorkflow,
@@ -34,8 +34,16 @@ const FULFILLMENT_SET_NAME = "Nigeria delivery";
 const SERVICE_ZONE_NAME = "Nigeria";
 const SHIPPING_OPTION_NAME = "Standard delivery";
 
-export default async function seedDeliveryFulfillment({ container }: ExecArgs): Promise<void> {
-  const logger = container.resolve("logger");
+/**
+ * Exported separately from the `medusa exec` default export so the
+ * integration test (delivery-fulfillment.spec.ts) can seed the exact
+ * same fixture the real CLI script produces, instead of a second,
+ * hand-rolled copy of this logic that could silently drift from it.
+ */
+export async function seedDeliveryFulfillmentCore(
+  container: MedusaContainer,
+  logger: Logger,
+): Promise<void> {
   const fulfillmentService = container.resolve(Modules.FULFILLMENT);
   const productService = container.resolve(Modules.PRODUCT);
   const stockLocationService = container.resolve(Modules.STOCK_LOCATION);
@@ -175,4 +183,9 @@ export default async function seedDeliveryFulfillment({ container }: ExecArgs): 
   }
 
   logger.info("SEED-DELIVERY-FULFILLMENT-OK");
+}
+
+export default async function seedDeliveryFulfillment({ container }: ExecArgs): Promise<void> {
+  const logger = container.resolve<Logger>("logger");
+  await seedDeliveryFulfillmentCore(container, logger);
 }

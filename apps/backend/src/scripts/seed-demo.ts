@@ -192,7 +192,15 @@ export default async function seedDemo({ container }: ExecArgs): Promise<void> {
         title: `${size} / ${color}`,
         sku: `${handleize(spec.title)}-${size}-${handleize(color)}`.toUpperCase(),
         options: { Size: size, Color: color },
-        prices: [{ amount: spec.priceNaira * 100, currency_code: "ngn" }],
+        // Medusa v2's price-creation API takes the plain decimal amount
+        // (24500 for NGN24,500), NOT a subunit-multiplied integer --
+        // confirmed live 2026-07-18 by creating a test product with
+        // amount:100 and observing it render as "NGN 100.00" on the real
+        // storefront. A prior *100 here (matching Stripe/Paystack's own
+        // cents convention, which does NOT apply to Medusa's own price
+        // API) silently inflated every seeded price 100x; see
+        // paystack/service.ts's toKobo() for the other half of this fix.
+        prices: [{ amount: spec.priceNaira, currency_code: "ngn" }],
         manage_inventory: true,
       })),
     );
@@ -305,7 +313,7 @@ export default async function seedDemo({ container }: ExecArgs): Promise<void> {
             title: size,
             sku: `GUARD-PROOF-${size}`,
             options: { Size: size },
-            prices: [{ amount: 100000, currency_code: "ngn" }],
+            prices: [{ amount: 1000, currency_code: "ngn" }],
             manage_inventory: false,
           })),
           sales_channels: [{ id: defaultSalesChannel.id }],
