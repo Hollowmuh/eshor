@@ -37,6 +37,20 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - name: Migrate eshor_core spine schema (outbox/ledger/reservations/state machine)
+        # Found missing 2026-07-19 while proof-of-work-auditing this
+        # workflow against a genuinely fresh, never-migrated database
+        # (this job's own Postgres service, same as CI's): without this,
+        # every DB-backed kernel test fails with "relation eshor_core.*
+        # does not exist" -- packages/kernel's raw SQL migrations are
+        # deliberately separate from Medusa's own migration system (see
+        # migrate.mts's own comment) and were never wired into CI, only
+        # documented as a manual local-dev step in README. This also
+        # creates the eshor_app role the ledger-immutability test
+        # connects as (see DATABASE_URL_LEDGER_TEST below).
+        run: pnpm --filter @eshor/kernel migrate
+        env:
+          DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
       - name: Lint (includes money rule)
         run: pnpm lint
       - name: Typecheck
@@ -53,6 +67,13 @@ jobs:
         run: pnpm test
         env:
           DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
+          # eshor_app is a deliberately-limited Postgres role (created by
+          # the migration above) that can INSERT/SELECT on the ledger but
+          # not UPDATE/DELETE -- the ledger-immutability test connects as
+          # this role to prove append-only is DB-enforced, not just
+          # app-code-enforced. Password matches migrations/001's literal
+          # CREATE ROLE (same value README documents for local dev).
+          DATABASE_URL_LEDGER_TEST: postgres://eshor_app:eshor_app_dev@localhost:5432/eshor_test
           REDIS_URL: redis://localhost:6379
       - name: Backend module-integration tests (real Postgres)
         # medusaIntegrationTestRunner creates + self-migrates its own
