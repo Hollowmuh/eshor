@@ -120,10 +120,46 @@ const eshorPlugin = {
 
 export default tseslint.config(
   {
-    ignores: ["**/node_modules/**", "**/.next/**", "**/dist/**", "**/.medusa/**"],
+    // apps/storefront has its own dedicated, already-authoritative
+    // `next lint` config (registers eslint-plugin-react-hooks, ignores
+    // `_`-prefixed unused vars) and uses Medusa's own major-unit decimal
+    // money convention, not @eshor/kernel's kobo integers -- the
+    // money-lint rule below does not apply there. Re-linting it here
+    // with a different, less-configured ruleset produced only false
+    // positives (confirmed 2026-07-18: every flagged file was
+    // pre-existing, untouched Medusa-starter code doing ordinary decimal
+    // division for unit-price display).
+    ignores: [
+      "**/node_modules/**",
+      "**/.next/**",
+      "**/dist/**",
+      "**/.medusa/**",
+      "apps/storefront/**",
+    ],
   },
   ...tseslint.configs.recommended,
   {
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
+    },
+  },
+  {
+    // Plain Node/CommonJS scripts, not bundled TS -- require() is correct here.
+    files: ["scripts/**/*.js"],
+    rules: {
+      "@typescript-eslint/no-require-imports": "off",
+    },
+  },
+  {
+    // Money-lint rule (hardening §2.5): monetary values are kobo
+    // integers; float-producing operations on money-named identifiers
+    // are banned in the kernel and the backend that consumes it. Scoped
+    // here (not repo-wide) to match that intent -- see the ignores block
+    // above for why apps/storefront is excluded.
+    files: ["packages/kernel/**/*.ts", "apps/backend/**/*.ts"],
     plugins: { eshor: eshorPlugin },
     rules: {
       "eshor/no-float-money": "error",

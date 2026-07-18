@@ -54,6 +54,21 @@ jobs:
         env:
           DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
           REDIS_URL: redis://localhost:6379
+      - name: Backend module-integration tests (real Postgres)
+        # medusaIntegrationTestRunner creates + self-migrates its own
+        # scratch database per run (confirmed from the installed
+        # @medusajs/test-utils source) -- no separate `medusa db:migrate`
+        # step needed, just a reachable Postgres the CI role can
+        # CREATE DATABASE on.
+        run: pnpm --filter @eshor/backend test:integration:modules
+        env:
+          DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
+          REDIS_URL: redis://localhost:6379
+      - name: Backend HTTP integration tests (real Postgres)
+        run: pnpm --filter @eshor/backend test:integration:http
+        env:
+          DATABASE_URL: postgres://eshor:eshor_ci@localhost:5432/eshor_test
+          REDIS_URL: redis://localhost:6379
       - name: Prove the money-lint and boot-guard gates actually fail bad code
         run: bash scripts/prove-gates.sh
 
@@ -140,6 +155,21 @@ jobs:
       - name: Seed demo catalog (creates NG region + 12 products)
         working-directory: apps/backend
         run: npx medusa exec ./src/scripts/seed-demo.ts
+
+      - name: Seed Nigerian delivery zones
+        working-directory: apps/backend
+        run: npx medusa exec ./src/scripts/seed-delivery-zones.ts
+
+      - name: Seed delivery-zones fulfillment (shipping option)
+        working-directory: apps/backend
+        run: npx medusa exec ./src/scripts/seed-delivery-fulfillment.ts
+
+      # link-paystack-to-region.ts intentionally NOT run here: it needs
+      # PAYSTACK_SECRET_KEY, which isn't (and shouldn't be) set in this
+      # workflow -- apps/backend/.env's real test key is gitignored, and
+      # this job never exercises checkout anyway (Lighthouse only hits
+      # home/PLP/PDP). Kept in README.md's local-dev steps only, where a
+      # developer's own .env already has a real test key.
 
       - name: Remove starter sample products (the actual Lighthouse fix)
         working-directory: apps/backend

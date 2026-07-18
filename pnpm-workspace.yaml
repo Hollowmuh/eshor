@@ -1,6 +1,13 @@
 packages:
   - "apps/*"
   - "packages/*"
+overrides:
+  '@ariakit/react-components': '0.3.3'
+  # medusa lint (apps/backend) refuses to run against jiti 1.x
+  # ("outdated version... update to ensure compatibility") -- confirmed
+  # pre-existing 2026-07-18 (this pin was already 1.21.7 before today's
+  # session touched anything), not caused by any dependency added today.
+  jiti: '^2'
 allowBuilds:
   '@medusajs/telemetry': true
   '@swc/core': true

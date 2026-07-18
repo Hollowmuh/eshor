@@ -8,7 +8,7 @@
  * eshor_app role) to be set and migrations already applied.
  */
 import { randomUUID } from "node:crypto";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import pg from "pg";
 import {
   closePool,
