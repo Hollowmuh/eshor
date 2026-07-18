@@ -27,6 +27,16 @@ import { PaystackApiError, PaystackClient, type PaystackTransaction } from "./cl
 
 export interface PaystackOptions {
   secretKey: string;
+  /**
+   * Which Charge API channel this provider instance uses for
+   * initiatePayment. Card is the default (Inline/redirect via
+   * /transaction/initialize); "bank_transfer" registers a second
+   * instance of this same class under a distinct provider id (see
+   * medusa-config.ts) so the storefront can offer both as separate
+   * checkout options (G-P8: card and Charge-API channels are different
+   * integration surfaces wrapped behind one interface here).
+   */
+  channel?: "card" | "bank_transfer";
 }
 
 type InjectedDependencies = {
@@ -36,19 +46,16 @@ type InjectedDependencies = {
 /**
  * P1.3 Paystack payment provider (Medusa's AbstractPaymentProvider
  * interface, confirmed against the installed 2.17.2 package source --
- * not guessed). Card (Inline/redirect) + USSD via the Charge API +
- * webhook-verified capture. Pay-with-Transfer and Dedicated Virtual
- * Accounts are P1.3-follow-on / P3 scope (DVA specifically needs a
- * CAC-registered business, gotcha G-P3).
+ * not guessed). Card (Inline/redirect) + Pay with Transfer, both via
+ * this one class (see `channel` option) + webhook-verified capture.
+ * USSD is coded in the client but not registered as a checkout option
+ * yet. Dedicated Virtual Accounts stay P3 scope (needs a CAC-registered
+ * business, gotcha G-P3) -- Pay with Transfer here uses a temporary
+ * per-transaction account instead, which needs no business registration.
  *
- * NOT YET LIVE-TESTED: no Paystack test-mode API keys exist in this
- * environment yet (P1 plan D1 -- external dependency). Every method
- * below is built against Paystack's confirmed-current API shape
- * (2026-07-17 docs check) and Medusa's real provider interface, but the
- * actual request/response cycle against Paystack's sandbox has not been
- * exercised. This is exactly the class of risk the P1 plan's "real-
- * money test matrix" exit criterion exists to catch -- flagged, not
- * hidden.
+ * Card flow live-verified 2026-07-17. Bank-transfer charge response
+ * shape confirmed live 2026-07-18 against the real test-mode sandbox
+ * (see client.ts's PaystackBankTransferCharge comment).
  */
 class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
   static identifier = "paystack";
@@ -86,21 +93,27 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
   }
 
   /**
-   * CONFIRMED live 2026-07-17 (was flagged unverified, now resolved):
-   * Medusa's BigNumberInput here is ALREADY in the currency's smallest
-   * unit (kobo for NGN) -- it matches the raw `amount` stored on the
-   * product variant's price exactly (seed-demo.ts seeds
-   * `priceNaira * 100`, and the payment session's `input.amount` arrived
-   * as that same number, e.g. 2450000 for a NGN24,500 item). No
-   * multiplication needed; multiplying here would have silently
-   * overcharged every real transaction by 100x.
+   * CORRECTED 2026-07-18: the 2026-07-17 "confirmed live" note above was
+   * wrong -- it was tested against seed-demo.ts's OWN bug
+   * (`priceNaira * 100`), which pre-inflated every price by 100x. That
+   * inflation exactly canceled out a missing multiplication here, so the
+   * real Paystack test charge happened to land on the correct amount
+   * for the wrong reason. Once seed-demo.ts was fixed to seed the plain
+   * decimal amount (24500 for NGN24,500, confirmed live by creating a
+   * test product and observing it render correctly), Medusa's
+   * BigNumberInput here arrives as that same plain decimal -- so this
+   * function must now do the real Naira-to-kobo conversion Paystack's
+   * API actually requires (amounts in kobo, the subunit). Skipping the
+   * multiplication again would silently undercharge every real
+   * transaction by 100x.
    */
   private toKobo(amount: unknown): number {
-    return Math.round(Number(amount));
+    return Math.round(Number(amount) * 100);
   }
 
+  /** Inverse of toKobo -- converts a real Paystack kobo amount (from a webhook payload) back to Medusa's plain-decimal BigNumberInput. */
   private fromKobo(amountKobo: number): BigNumber {
-    return new BigNumber(amountKobo);
+    return new BigNumber(amountKobo / 100);
   }
 
   /**
@@ -136,8 +149,34 @@ class PaystackProviderService extends AbstractPaymentProvider<PaystackOptions> {
   }
 
   async initiatePayment(input: InitiatePaymentInput): Promise<InitiatePaymentOutput> {
-    const reference = `eshor_${randomUUID()}`;
     const email = this.customerEmail(input);
+
+    if (this.options_.channel === "bank_transfer") {
+      // account_expires_at is REQUIRED by Paystack's API (confirmed
+      // live -- omitting it 400s), not optional as the docs summary
+      // implied. 30 minutes is comfortably inside Paystack's own
+      // accepted range (15 min - 8 hours).
+      const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+      const charge = await this.client_.chargeBankTransfer({
+        amountKobo: this.toKobo(input.amount),
+        email,
+        expiresAt,
+      });
+
+      return {
+        id: charge.reference,
+        data: {
+          reference: charge.reference,
+          account_name: charge.account_name,
+          account_number: charge.account_number,
+          bank_name: charge.bank.name,
+          account_expires_at: charge.account_expires_at,
+        },
+        status: "pending",
+      };
+    }
+
+    const reference = `eshor_${randomUUID()}`;
 
     const tx = await this.client_.initializeTransaction({
       amountKobo: this.toKobo(input.amount),

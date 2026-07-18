@@ -46,6 +46,24 @@ if (process.env.PAYSTACK_SECRET_KEY) {
             secretKey: process.env.PAYSTACK_SECRET_KEY,
           },
         },
+        {
+          // Distinct resolve path + a genuine subclass with its own
+          // static `identifier` (src/modules/paystack-transfer/index.ts)
+          // -- confirmed live 2026-07-18 that BOTH are required: same
+          // class registered twice (even under a distinct resolve path
+          // and config `id`) silently produces no usable provider,
+          // because Medusa's actual provider_id is
+          // pp_{module-id}_{class.identifier}, and it's the class's own
+          // `identifier` that was colliding. Real id ends up
+          // pp_paystack-transfer_paystack-transfer (not the shorter
+          // pp_paystack-transfer_paystack one might expect).
+          resolve: './src/modules/paystack-transfer',
+          id: 'paystack-transfer',
+          options: {
+            secretKey: process.env.PAYSTACK_SECRET_KEY,
+            channel: 'bank_transfer',
+          },
+        },
       ],
     },
   })

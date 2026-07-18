@@ -1,11 +1,12 @@
 "use client"
 
-import { isManual, isStripeLike } from "@lib/constants"
+import { isManual, isPaystack, isPaystackTransfer, isStripeLike } from "@lib/constants"
 import { placeOrder } from "@lib/data/cart"
 import { HttpTypes } from "@medusajs/types"
-import { Button } from "@modules/common/components/ui"
+import { Button, Text } from "@modules/common/components/ui"
 import { useElements, useStripe } from "@stripe/react-stripe-js"
-import React, { useState } from "react"
+import PaystackPop from "@paystack/inline-js"
+import React, { useEffect, useState } from "react"
 import ErrorMessage from "../error-message"
 
 type PaymentButtonProps = {
@@ -38,6 +39,22 @@ const PaymentButton: React.FC<PaymentButtonProps> = ({
     case isManual(paymentSession?.provider_id):
       return (
         <ManualTestPaymentButton notReady={notReady} data-testid={dataTestId} />
+      )
+    case isPaystack(paymentSession?.provider_id):
+      return (
+        <PaystackPaymentButton
+          notReady={notReady}
+          cart={cart}
+          data-testid={dataTestId}
+        />
+      )
+    case isPaystackTransfer(paymentSession?.provider_id):
+      return (
+        <PaystackTransferPanel
+          notReady={notReady}
+          cart={cart}
+          data-testid={dataTestId}
+        />
       )
     default:
       return <Button disabled>Select a payment method</Button>
@@ -187,6 +204,183 @@ const ManualTestPaymentButton = ({ notReady }: { notReady: boolean }) => {
         data-testid="manual-payment-error-message"
       />
     </>
+  )
+}
+
+/**
+ * P1.4: the backend's PaystackProviderService.initiatePayment already
+ * returns data.access_code (see that service's own comment) precisely
+ * so the browser can resume the already-server-initialized transaction
+ * via Inline.js's resumeTransaction(), instead of a redirect flow --
+ * confirmed against @paystack/inline-js's own README (no shipped
+ * types, see src/types/paystack-inline-js.d.ts).
+ *
+ * onSuccess here is only a UI signal to proceed; it is NOT the trust
+ * boundary. placeOrder() -> Medusa's completeCartWorkflow ->
+ * PaystackProviderService.authorizePayment() re-verifies the
+ * transaction server-side against Paystack's own API before an order
+ * is ever created.
+ */
+const PaystackPaymentButton = ({
+  cart,
+  notReady,
+  "data-testid": dataTestId,
+}: {
+  cart: HttpTypes.StoreCart
+  notReady: boolean
+  "data-testid"?: string
+}) => {
+  const [submitting, setSubmitting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const session = cart.payment_collection?.payment_sessions?.find(
+    (s) => s.status === "pending"
+  )
+  const accessCode = session?.data?.access_code as string | undefined
+
+  const handlePayment = () => {
+    if (!accessCode) {
+      setErrorMessage("Payment session is missing a Paystack access code.")
+      return
+    }
+
+    setSubmitting(true)
+    setErrorMessage(null)
+
+    const popup = new PaystackPop()
+    popup.resumeTransaction(accessCode, {
+      onSuccess: () => {
+        placeOrder()
+          .catch((err) => {
+            setErrorMessage(err.message)
+          })
+          .finally(() => {
+            setSubmitting(false)
+          })
+      },
+      onCancel: () => {
+        setSubmitting(false)
+      },
+      onError: (error) => {
+        setErrorMessage(error.message)
+        setSubmitting(false)
+      },
+    })
+  }
+
+  return (
+    <>
+      <Button
+        disabled={notReady || !accessCode}
+        onClick={handlePayment}
+        size="large"
+        isLoading={submitting}
+        data-testid={dataTestId}
+      >
+        Place order
+      </Button>
+      <ErrorMessage
+        error={errorMessage}
+        data-testid="paystack-payment-error-message"
+      />
+    </>
+  )
+}
+
+/**
+ * Pay with Transfer has nothing to "click" to complete -- the shopper
+ * must leave the page and make a real bank transfer to the generated
+ * temporary account. completeCartWorkflow (Medusa's own, confirmed by
+ * reading its source) is idempotent: calling placeOrder() repeatedly is
+ * safe and will not create duplicate orders, and each call's own
+ * authorizePayment() re-verifies against Paystack's real API (G-P2:
+ * verify, don't just trust the webhook) -- so light polling here, not a
+ * webhook-only wait, is both simple and correct. A successful call
+ * redirects via placeOrder()'s own existing redirect(); until then, a
+ * "not authorized yet" response is expected and silently retried.
+ */
+const PaystackTransferPanel = ({
+  cart,
+  notReady,
+  "data-testid": dataTestId,
+}: {
+  cart: HttpTypes.StoreCart
+  notReady: boolean
+  "data-testid"?: string
+}) => {
+  const [checking, setChecking] = useState(false)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+
+  const session = cart.payment_collection?.payment_sessions?.find(
+    (s) => s.status === "pending"
+  )
+  const accountNumber = session?.data?.account_number as string | undefined
+  const bankName = session?.data?.bank_name as string | undefined
+  const accountName = session?.data?.account_name as string | undefined
+  const expiresAt = session?.data?.account_expires_at as string | undefined
+
+  const checkNow = async () => {
+    setChecking(true)
+    setErrorMessage(null)
+    try {
+      await placeOrder()
+    } catch {
+      // Not authorized yet -- expected until the transfer is completed
+      // and verified. Unlike the silent background poll, a manual click
+      // deserves a gentle status message rather than nothing happening.
+      setErrorMessage(
+        "Not confirmed yet -- this can take a few minutes after your transfer. We'll also check automatically."
+      )
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  useEffect(() => {
+    if (notReady || !accountNumber) return
+    const interval = setInterval(() => {
+      placeOrder().catch(() => {})
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [notReady, accountNumber])
+
+  if (!accountNumber) {
+    return <ErrorMessage error="Payment session is missing transfer account details." />
+  }
+
+  return (
+    <div className="flex flex-col gap-y-4" data-testid={dataTestId}>
+      <div className="bg-ui-bg-subtle border border-ui-border-base rounded-lg p-4 flex flex-col gap-y-1">
+        <Text className="txt-small text-ui-fg-subtle">Transfer to</Text>
+        <Text className="txt-large-plus" data-testid="transfer-account-number">
+          {accountNumber}
+        </Text>
+        <Text className="txt-medium text-ui-fg-subtle">
+          {bankName} · {accountName}
+        </Text>
+        {expiresAt && (
+          <Text className="txt-small text-ui-fg-muted mt-2">
+            Expires {new Date(expiresAt).toLocaleTimeString()}
+          </Text>
+        )}
+      </div>
+      <Text className="txt-small text-ui-fg-subtle">
+        We&apos;ll confirm automatically once the transfer arrives. You can
+        also check manually below.
+      </Text>
+      <Button
+        onClick={checkNow}
+        size="large"
+        isLoading={checking}
+        disabled={notReady}
+      >
+        I&apos;ve made the transfer
+      </Button>
+      <ErrorMessage
+        error={errorMessage}
+        data-testid="paystack-transfer-error-message"
+      />
+    </div>
   )
 }
 

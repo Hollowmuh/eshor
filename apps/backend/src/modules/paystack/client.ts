@@ -22,13 +22,41 @@ export interface PaystackTransaction {
   reference: string;
   authorization_url?: string;
   access_code?: string;
-  status: "success" | "failed" | "abandoned" | "pending" | "ongoing" | "queued" | "reversed";
+  status:
+    | "success"
+    | "failed"
+    | "abandoned"
+    | "pending"
+    | "pending_bank_transfer"
+    | "ongoing"
+    | "queued"
+    | "reversed";
   amount: number;
   currency: string;
   gateway_response?: string;
   paid_at?: string | null;
   channel?: string;
   metadata?: Record<string, unknown>;
+}
+
+/**
+ * Pay with Transfer's /charge response -- confirmed live 2026-07-18
+ * against the real test-mode sandbox (docs don't show a full example
+ * for this channel, only that account_expires_at is required):
+ * {reference, status: "pending_bank_transfer", display_text,
+ *  account_name, account_number, bank: {slug, name, id},
+ *  account_expires_at, amount}. No access_code/authorization_url,
+ *  unlike the card flow.
+ */
+export interface PaystackBankTransferCharge {
+  reference: string;
+  status: string;
+  display_text?: string;
+  account_name: string;
+  account_number: string;
+  bank: { slug: string; name: string; id: number };
+  account_expires_at: string;
+  amount: number;
 }
 
 export class PaystackClient {
@@ -88,6 +116,25 @@ export class PaystackClient {
       amount: input.amountKobo,
       email: input.email,
       ussd: { type: input.ussdType ?? "737" },
+    });
+  }
+
+  /**
+   * Pay with Transfer (Charge API): generates a temporary account number
+   * tied to this one transaction (NOT a Dedicated Virtual Account -- DVA
+   * needs a registered business, deferred to P3 per G-P3). Confirmed
+   * live: account_expires_at is REQUIRED, not optional as the docs
+   * summary implied -- omitting it 400s with "date field is required".
+   */
+  async chargeBankTransfer(input: {
+    amountKobo: number;
+    email: string;
+    expiresAt: Date;
+  }): Promise<PaystackBankTransferCharge> {
+    return this.request("POST", "/charge", {
+      amount: input.amountKobo,
+      email: input.email,
+      bank_transfer: { account_expires_at: input.expiresAt.toISOString() },
     });
   }
 
