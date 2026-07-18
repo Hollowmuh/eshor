@@ -2,6 +2,9 @@ import { HttpTypes } from "@medusajs/types"
 import { Container } from "@modules/common/components/ui"
 import Checkbox from "@modules/common/components/checkbox"
 import Input from "@modules/common/components/input"
+import NativeSelect from "@modules/common/components/native-select"
+import { NIGERIAN_STATES } from "@lib/util/nigerian-states"
+import LocalizedClientLink from "@modules/common/components/localized-client-link"
 import { mapKeys } from "lodash"
 import React, { useEffect, useMemo, useState } from "react"
 import AddressSelect from "../address-select"
@@ -30,6 +33,7 @@ const ShippingAddress = ({
     "shipping_address.phone": cart?.shipping_address?.phone || "",
     email: cart?.email || "",
   })
+  const [privacyConsent, setPrivacyConsent] = useState(false)
 
   const countriesInRegion = useMemo(
     () => cart?.region?.countries?.map((c) => c.iso_2),
@@ -175,14 +179,21 @@ const ShippingAddress = ({
           required
           data-testid="shipping-country-select"
         />
-        <Input
-          label="State / Province"
+        <NativeSelect
+          placeholder="State"
           name="shipping_address.province"
           autoComplete="address-level1"
           value={formData["shipping_address.province"]}
           onChange={handleChange}
-          data-testid="shipping-province-input"
-        />
+          required
+          data-testid="shipping-province-select"
+        >
+          {NIGERIAN_STATES.map((s) => (
+            <option key={s} value={s}>
+              {s}
+            </option>
+          ))}
+        </NativeSelect>
       </div>
       <div className="my-8">
         <Checkbox
@@ -213,6 +224,22 @@ const ShippingAddress = ({
           onChange={handleChange}
           data-testid="shipping-phone-input"
         />
+      </div>
+      <div className="flex items-center gap-x-2 mb-4">
+        <Checkbox
+          label="I agree to the"
+          name="privacy_consent"
+          checked={privacyConsent}
+          onChange={() => setPrivacyConsent((c) => !c)}
+          data-testid="privacy-consent-checkbox"
+        />
+        <LocalizedClientLink
+          href="/privacy"
+          target="_blank"
+          className="text-ui-fg-interactive hover:text-ui-fg-interactive-hover txt-medium underline"
+        >
+          Privacy Policy
+        </LocalizedClientLink>
       </div>
     </>
   )

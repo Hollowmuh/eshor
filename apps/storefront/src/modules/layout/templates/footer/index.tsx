@@ -109,37 +109,26 @@ export default async function Footer() {
               </div>
             )}
             <div className="flex flex-col gap-y-2">
-              <span className="txt-small-plus txt-ui-fg-base">Medusa</span>
-              <ul className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle txt-small">
+              <span className="txt-small-plus txt-ui-fg-base">Legal</span>
+              <ul
+                className="grid grid-cols-1 gap-y-2 text-ui-fg-subtle txt-small"
+                data-testid="footer-legal"
+              >
                 <li>
-                  <a
-                    href="https://github.com/medusajs"
-                    target="_blank"
-                    rel="noreferrer"
+                  <LocalizedClientLink
+                    href="/privacy"
                     className="hover:text-ui-fg-base"
                   >
-                    GitHub
-                  </a>
+                    Privacy Policy
+                  </LocalizedClientLink>
                 </li>
                 <li>
-                  <a
-                    href="https://docs.medusajs.com"
-                    target="_blank"
-                    rel="noreferrer"
+                  <LocalizedClientLink
+                    href="/policies"
                     className="hover:text-ui-fg-base"
                   >
-                    Documentation
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="https://github.com/medusajs/dtc-starter"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="hover:text-ui-fg-base"
-                  >
-                    Source code
-                  </a>
+                    Returns &amp; Exchanges
+                  </LocalizedClientLink>
                 </li>
               </ul>
             </div>

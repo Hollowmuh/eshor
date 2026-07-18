@@ -15,6 +15,7 @@ import {
 } from "./cookies"
 import { getRegion } from "./regions"
 import { getLocale } from "./locale-actions"
+import { silentGuestAuth } from "./customer"
 
 /**
  * Retrieves a cart by its ID. If no ID is provided, it will use the cart ID from the cookies.
@@ -278,7 +279,7 @@ export async function applyPromotions(codes: string[]) {
     .catch(medusaError)
 }
 
-export async function applyGiftCard(code: string) {
+export async function applyGiftCard(_code: string) {
   //   const cartId = getCartId()
   //   if (!cartId) return "No cartId cookie found"
   //   try {
@@ -290,7 +291,7 @@ export async function applyGiftCard(code: string) {
   //   }
 }
 
-export async function removeDiscount(code: string) {
+export async function removeDiscount(_code: string) {
   // const cartId = getCartId()
   // if (!cartId) return "No cartId cookie found"
   // try {
@@ -302,8 +303,8 @@ export async function removeDiscount(code: string) {
 }
 
 export async function removeGiftCard(
-  codeToRemove: string,
-  giftCards: any[]
+  _codeToRemove: string,
+  _giftCards: unknown[]
   // giftCards: GiftCard[]
 ) {
   //   const cartId = getCartId()
@@ -328,8 +329,8 @@ export async function submitPromotionForm(
   const code = formData.get("code") as string
   try {
     await applyPromotions([code])
-  } catch (e: any) {
-    return e.message
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -342,6 +343,12 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
     const cartId = getCartId()
     if (!cartId) {
       throw new Error("No existing cart found when setting addresses")
+    }
+
+    // E9 (compliance floor): consent records must capture what, when, and
+    // which wording version was agreed to -- not just a checkbox gate.
+    if (formData.get("privacy_consent") !== "on") {
+      return "Please agree to the Privacy Policy to continue."
     }
 
     const data = {
@@ -358,7 +365,12 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
         phone: formData.get("shipping_address.phone"),
       },
       email: formData.get("email"),
-    } as any
+      metadata: {
+        privacy_consent: true,
+        privacy_consent_at: new Date().toISOString(),
+        privacy_policy_version: "1",
+      },
+    } as unknown as HttpTypes.StoreUpdateCart
 
     const sameAsBilling = formData.get("same_as_billing")
     if (sameAsBilling === "on") data.billing_address = data.shipping_address
@@ -377,8 +389,25 @@ export async function setAddresses(currentState: unknown, formData: FormData) {
         phone: formData.get("billing_address.phone"),
       }
     await updateCart(data)
-  } catch (e: any) {
-    return e.message
+
+    // Medusa's createPaymentSessionsWorkflow only populates
+    // context.customer (which payment providers like Paystack read the
+    // shopper's email from) for an authenticated request -- silently
+    // establish a guest session now, right after the email is known,
+    // rather than letting checkout proceed unauthenticated and fail
+    // later at the payment step. See silentGuestAuth's own doc comment
+    // for the full trace.
+    const guestAuthResult = await silentGuestAuth(
+      formData.get("email") as string
+    )
+    if (guestAuthResult.state === "identity_exists") {
+      return "An account already exists with this email. Please sign in at /account, then return to checkout."
+    }
+    if (guestAuthResult.state === "error") {
+      return guestAuthResult.error
+    }
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
   }
 
   redirect(
