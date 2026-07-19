@@ -86,6 +86,17 @@ services:
     build:
       context: .
       dockerfile: apps/storefront/Dockerfile
+      # network: host (not just the runtime network_mode: host below) --
+      # found live 2026-07-19: `network_mode:` only applies to the
+      # RUNNING container, not the `docker build` step itself, which
+      # gets its own isolated network unless told otherwise. `next
+      # build` fetches from the backend at build time to statically
+      # collect page data for dynamic routes (e.g. categories) --
+      # without this, that fetch to NEXT_PUBLIC_MEDUSA_BACKEND_URL=
+      # http://127.0.0.1:9000 hit the BUILD container's own loopback,
+      # not the VM's, and 127.0.0.1:9000 was nothing there -- failed
+      # with "Failed to collect page data for /[countryCode]/categories/[...category]".
+      network: host
       # NEXT_PUBLIC_* vars are baked into the client bundle at Next.js
       # BUILD time, not read at container runtime -- must be passed as
       # build args (sourced from this file's own `environment:` block
