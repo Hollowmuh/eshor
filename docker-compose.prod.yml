@@ -1,0 +1,66 @@
+# Phase 1 GCP smoke deploy (see docs/2026-07-19/gcloud_backend_deployment_0122.md):
+# backend + postgres + redis only, reachable via the VM's own port 9000.
+# No Caddy/TLS/imgproxy yet -- those need a real domain, still an open
+# PRD question (Q1) as of this deploy. Secrets come from a root-level
+# `.env` file created directly on the VM (gitignored, never committed) --
+# docker compose auto-loads it for the ${VAR} substitution below, so
+# POSTGRES_PASSWORD stays a single source of truth shared by both the
+# postgres service and the backend's own DATABASE_URL.
+name: eshor-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: eshor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: eshor
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eshor -d eshor"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    # No ports: published -- only reachable from other containers on this
+    # compose network (backend, and the host-side backup cron via `docker
+    # compose exec`), matching gotcha G-I5's "compose services bind to
+    # localhost" principle even before Caddy exists.
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      APP_ENV: production
+      DATABASE_URL: postgres://eshor:${POSTGRES_PASSWORD}@postgres:5432/eshor
+      REDIS_URL: redis://redis:6379
+      # IP-based, no real frontend origin yet -- tighten once the
+      # storefront has a real Vercel URL and/or a domain exists.
+      STORE_CORS: "*"
+      ADMIN_CORS: "*"
+      AUTH_CORS: "*"
+      JWT_SECRET: ${JWT_SECRET}
+      COOKIE_SECRET: ${COOKIE_SECRET}
+      PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
+    ports:
+      - "9000:9000"
+    restart: unless-stopped
+
+volumes:
+  pgdata:
