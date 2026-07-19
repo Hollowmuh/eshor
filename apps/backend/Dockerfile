@@ -42,4 +42,18 @@ RUN pnpm --filter @eshor/backend run build
 ENV NODE_ENV=production
 EXPOSE 9000
 
-CMD ["pnpm", "--filter", "@eshor/backend", "run", "start"]
+# medusa build's real output lives in apps/backend/.medusa/server (a
+# self-contained copy with its own compiled src/ + medusa-config.js) --
+# `medusa start` resolves its admin-build path (public/admin/index.html)
+# relative to ITS OWN cwd, so running it from apps/backend (one level up
+# from where the build actually put that directory) fails with "Could
+# not find index.html in the admin build directory" even though the
+# file genuinely exists one level down. Medusa's own convention is to
+# start from .medusa/server, not the source directory -- confirmed by
+# checking where medusa build actually wrote public/admin/index.html
+# inside this exact image. `npx` (not `pnpm`) here for the same reason
+# as the build step below: apps/backend's package.json (copied
+# verbatim into .medusa/server) pins npm as its packageManager, and
+# corepack refuses `pnpm` invoked directly inside that directory.
+WORKDIR /workspace/apps/backend/.medusa/server
+CMD ["npx", "medusa", "start"]
