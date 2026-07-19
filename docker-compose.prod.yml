@@ -82,5 +82,27 @@ services:
     # No `ports:` -- network_mode: host binds directly to the VM's own
     # port 9000, `ports:` is invalid/ignored in host networking mode.
 
+  storefront:
+    build:
+      context: .
+      dockerfile: apps/storefront/Dockerfile
+      # NEXT_PUBLIC_* vars are baked into the client bundle at Next.js
+      # BUILD time, not read at container runtime -- must be passed as
+      # build args (sourced from this file's own `environment:` block
+      # below only affects the running process, too late for anything
+      # client-side; a rebuild is required any time one of these changes).
+      args:
+        NEXT_PUBLIC_MEDUSA_BACKEND_URL: ${NEXT_PUBLIC_MEDUSA_BACKEND_URL}
+        NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY: ${NEXT_PUBLIC_MEDUSA_PUBLISHABLE_KEY}
+        NEXT_PUBLIC_DEFAULT_REGION: ${NEXT_PUBLIC_DEFAULT_REGION}
+        NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL}
+        NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY: ${NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY}
+        NEXT_PUBLIC_WHATSAPP_NUMBER: ${NEXT_PUBLIC_WHATSAPP_NUMBER}
+    network_mode: host
+    depends_on:
+      - backend
+    restart: unless-stopped
+    # No `ports:` -- same host-networking reasoning as backend above.
+
 volumes:
   pgdata:
