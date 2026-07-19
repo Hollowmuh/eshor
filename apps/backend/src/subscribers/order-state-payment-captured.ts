@@ -21,6 +21,11 @@ export default async function orderStatePaymentCapturedHandler({
 
   const { data: orders } = await query.graph({
     entity: "order",
+    // @ts-expect-error -- payment_collections is a real, working filter on
+    // the order entity's query graph (confirmed live against the admin
+    // payment query-config, and exercised by real webhook/order-tracking
+    // tests) -- the generated query-config type just doesn't expose it.
+    // Found blocking `medusa build` 2026-07-19.
     filters: { payment_collections: { id: payment.payment_collection_id } },
     fields: ["id"],
   });

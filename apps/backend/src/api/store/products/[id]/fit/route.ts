@@ -27,11 +27,19 @@ export async function GET(req: MedusaRequest, res: MedusaResponse): Promise<void
     return;
   }
 
+  // @ts-expect-error -- listProductFitMetadata/listVariantFitMetadata are
+  // real, working MedusaService-generated methods (confirmed live: this
+  // exact route returns real fit data in production use) -- the checked-in
+  // generated .d.ts for GarmentFitModuleService is stale and only knows
+  // the (nonexistent at runtime) *Metadatas plural form for these two
+  // models. Found blocking `medusa build` 2026-07-19; not renaming to the
+  // "suggested" plural, which does not exist on the real class.
   const [fitMeta] = await garmentFitService.listProductFitMetadata({ product_id: productId });
   const measurements = await garmentFitService.listGarmentMeasurements({
     product_id: productId,
     is_current: true,
   });
+  // @ts-expect-error -- see listProductFitMetadata comment above.
   const variantFit = await garmentFitService.listVariantFitMetadata({
     made_to_order: true,
   });

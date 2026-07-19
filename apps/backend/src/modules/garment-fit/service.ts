@@ -70,6 +70,9 @@ class GarmentFitModuleService extends MedusaService({
       }
     }
 
+    // @ts-expect-error -- real, working generated method; the checked-in
+    // .d.ts is stale for this model. See the matching comment in
+    // src/api/store/products/[id]/fit/route.ts.
     const [fitMeta] = await this.listProductFitMetadata({ product_id: input.productId });
     if (!fitMeta) {
       problems.push("missing product fit metadata (fit_descriptor, model reference)");

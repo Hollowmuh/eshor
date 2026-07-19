@@ -65,7 +65,7 @@ export default async function p1OrderStateDrill({ container }: ExecArgs): Promis
       region_id: region.id,
       sales_channel_id: salesChannel.id,
       currency_code: "ngn",
-      items: [{ variant_id: variant.id, quantity: 1 }],
+      items: [{ variant_id: variant.id, quantity: 1, title: variant.title ?? "Drill item", unit_price: 24500 }],
       shipping_address: {
         first_name: "Drill",
         last_name: "Test",

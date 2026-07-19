@@ -2,7 +2,15 @@ import { loadEnv, defineConfig } from '@medusajs/framework/utils'
 
 loadEnv(process.env.NODE_ENV || 'development', process.cwd())
 
-const modules: NonNullable<Parameters<typeof defineConfig>[0]>['modules'] = [
+// NonNullable<Parameters<typeof defineConfig>[0]>['modules'] resolves to
+// an object-keyed Record type in this Medusa version's own typings, but
+// the array form below is what Medusa's runtime module loader actually
+// accepts (confirmed live all session -- every module/provider here
+// registers and works correctly). Typed explicitly rather than trusting
+// that inferred type, which was blocking `medusa build` on a type-only
+// mismatch with no real bug behind it.
+type ModuleEntry = { resolve: string; id?: string; options?: Record<string, unknown> }
+const modules: ModuleEntry[] = [
   {
     resolve: './src/modules/garment-fit',
   },

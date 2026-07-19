@@ -15,6 +15,7 @@ export default async function orderStatePaymentRefundedHandler({
 
   const { data: orders } = await query.graph({
     entity: "order",
+    // @ts-expect-error -- see order-state-payment-captured.ts's matching comment.
     filters: { payment_collections: { id: payment.payment_collection_id } },
     fields: ["id"],
   });

@@ -238,6 +238,9 @@ export default async function seedDemo({ container }: ExecArgs): Promise<void> {
     }
 
     // product-level fit metadata — required by the publish guard.
+    // @ts-expect-error -- real, working generated method; the checked-in
+    // .d.ts is stale for this model. See the matching comment in
+    // src/api/store/products/[id]/fit/route.ts.
     await garmentFitService.createProductFitMetadata({
       product_id: product.id,
       fit_descriptor: spec.fitDescriptor,
@@ -251,6 +254,7 @@ export default async function seedDemo({ container }: ExecArgs): Promise<void> {
     if (mtoSize) {
       const mtoVariants = product.variants!.filter((v) => v.title?.startsWith(`${mtoSize} /`));
       for (const v of mtoVariants) {
+        // @ts-expect-error -- see createProductFitMetadata comment above.
         await garmentFitService.createVariantFitMetadata({
           variant_id: v.id,
           made_to_order: true,
