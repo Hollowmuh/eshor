@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Nightly backup for the GCP deploy (docs/2026-07-19/gcloud_backend_deployment_0122.md).
 # Dumps the deployed compose Postgres and uploads to GCS. Run via cron on
-# the VM: 0 2 * * * /root/eshor/scripts/gcp-backup.sh >> /var/log/eshor-backup.log 2>&1
+# the VM (default deploy user is NOT root -- e.g. the GCP OS Login user):
+# 0 2 * * * ESHOR_BACKUP_BUCKET=<bucket> /home/<user>/eshor/scripts/gcp-backup.sh >> /var/log/eshor-backup.log 2>&1
 set -euo pipefail
 
-COMPOSE_PROJECT_DIR="${COMPOSE_PROJECT_DIR:-/root/eshor}"
+COMPOSE_PROJECT_DIR="${COMPOSE_PROJECT_DIR:-$HOME/eshor}"
 BUCKET="${ESHOR_BACKUP_BUCKET:?ESHOR_BACKUP_BUCKET must be set}"
 DB=eshor
 USER=eshor
