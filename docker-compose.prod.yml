@@ -6,6 +6,24 @@
 # docker compose auto-loads it for the ${VAR} substitution below, so
 # POSTGRES_PASSWORD stays a single source of truth shared by both the
 # postgres service and the backend's own DATABASE_URL.
+#
+# backend uses network_mode: host, not the default bridge network --
+# found live 2026-07-19 (both on this GCP VM and reproduced locally)
+# that `medusa db:migrate` hangs indefinitely on Docker's default bridge
+# network specifically: it opens a Postgres transaction (confirmed via
+# knex debug logs) and then every thread goes idle (confirmed via
+# /proc/<pid>/task/*/wchan -- epoll_wait/futex_wait, nothing pending) and
+# never issues the next query. Ruled out via direct testing: not TTY
+# allocation, not pnpm's process wrapping vs plain npx, not missing PID-1
+# zombie reaping (--init), not Postgres locks (pg_locks/pg_stat_activity
+# empty). `--network host` (sharing the host's own network stack,
+# connecting via 127.0.0.1 instead of Docker's embedded DNS + bridge)
+# fixes it completely and reproducibly -- migrations run to completion
+# (174+ real migrations applied) instead of hanging after zero. Postgres
+# and Redis ports are published to 127.0.0.1 only (not 0.0.0.0) so they
+# stay unreachable from outside the VM, preserving the original
+# "compose services bind to localhost" intent even without bridge
+# networking's own isolation.
 name: eshor-prod
 
 services:
@@ -17,19 +35,19 @@ services:
       POSTGRES_DB: eshor
     volumes:
       - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U eshor -d eshor"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
-    # No ports: published -- only reachable from other containers on this
-    # compose network (backend, and the host-side backup cron via `docker
-    # compose exec`), matching gotcha G-I5's "compose services bind to
-    # localhost" principle even before Caddy exists.
 
   redis:
     image: redis:7-alpine
+    ports:
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -41,6 +59,7 @@ services:
     build:
       context: .
       dockerfile: apps/backend/Dockerfile
+    network_mode: host
     depends_on:
       postgres:
         condition: service_healthy
@@ -48,8 +67,9 @@ services:
         condition: service_healthy
     environment:
       APP_ENV: production
-      DATABASE_URL: postgres://eshor:${POSTGRES_PASSWORD}@postgres:5432/eshor
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://eshor:${POSTGRES_PASSWORD}@127.0.0.1:5432/eshor
+      REDIS_URL: redis://127.0.0.1:6379
+      PORT: "9000"
       # IP-based, no real frontend origin yet -- tighten once the
       # storefront has a real Vercel URL and/or a domain exists.
       STORE_CORS: "*"
@@ -58,9 +78,9 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       COOKIE_SECRET: ${COOKIE_SECRET}
       PAYSTACK_SECRET_KEY: ${PAYSTACK_SECRET_KEY}
-    ports:
-      - "9000:9000"
     restart: unless-stopped
+    # No `ports:` -- network_mode: host binds directly to the VM's own
+    # port 9000, `ports:` is invalid/ignored in host networking mode.
 
 volumes:
   pgdata:
